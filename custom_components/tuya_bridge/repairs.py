@@ -11,6 +11,7 @@ from homeassistant import data_entry_flow
 from homeassistant.components.repairs import RepairsFlow
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.selector import SelectSelector, SelectSelectorConfig, SelectOptionDict
 
 from .const import CATEGORY_TYPE_HINTS, DOMAIN
 
@@ -60,12 +61,14 @@ class TuyaBridgeRepairFlow(RepairsFlow):
             step_id="init",
             data_schema=vol.Schema(
                 {
-                    vol.Required("action", default="add_local"): vol.In(
-                        {
-                            "add_local": "Add locally (Tuya Local)",
-                            "cloud_entity": "Create Cloud Entity",
-                            "ignore": "Ignore this device",
-                        }
+                    vol.Required("action", default="add_local"): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[
+                                SelectOptionDict(value="add_local", label="Add locally (Tuya Local)"),
+                                SelectOptionDict(value="cloud_entity", label="Create Cloud Entity"),
+                                SelectOptionDict(value="ignore", label="Ignore this device"),
+                            ]
+                        )
                     ),
                 }
             ),
