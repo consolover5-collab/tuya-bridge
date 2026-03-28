@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Учётные данные Tuya Cloud",
-        "description": "Введите данные из Tuya IoT Platform (developer.tuya.com).",
+        "description": "Введите данные из Tuya IoT Platform (developer.tuya.com). Device ID определяется автоматически из существующих устройств Tuya Local.",
         "data": {
           "api_key": "Access ID (API Key)",
           "api_secret": "Access Secret",
@@ -14,6 +14,7 @@
     },
     "error": {
       "cannot_connect": "Не удалось подключиться к Tuya Cloud. Проверьте данные.",
+      "no_devices": "Не найдено ни одного устройства Tuya. Введите Device ID вручную.",
       "unknown": "Произошла неизвестная ошибка."
     },
     "abort": {

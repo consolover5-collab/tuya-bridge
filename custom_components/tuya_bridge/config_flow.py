@@ -21,6 +21,26 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def _find_seed_device_id(hass: HomeAssistant) -> str | None:
+    """Find any device_id from existing tuya_local or tuya entries to use as API seed."""
+    # Try tuya_local first
+    for entry in hass.config_entries.async_entries("tuya_local"):
+        device_id = entry.data.get("device_id", "")
+        if device_id:
+            return device_id
+
+    # Try official tuya integration device registry
+    from homeassistant.helpers import device_registry as dr
+
+    dev_reg = dr.async_get(hass)
+    for device in dev_reg.devices.values():
+        for identifier in device.identifiers:
+            if identifier[0] == "tuya" and identifier[1]:
+                return identifier[1]
+
+    return None
+
+
 async def _validate_credentials(
     hass: HomeAssistant, data: dict[str, Any]
 ) -> dict[str, Any] | None:
@@ -65,6 +85,19 @@ class TuyaBridgeConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
+            # Auto-fill device_id if not provided
+            if not user_input.get(CONF_API_DEVICE_ID):
+                seed = _find_seed_device_id(self.hass)
+                if seed:
+                    user_input[CONF_API_DEVICE_ID] = seed
+                else:
+                    errors = {"base": "no_devices"}
+                    return self.async_show_form(
+                        step_id="user",
+                        data_schema=self._build_schema(),
+                        errors=errors,
+                    )
+
             errors_result = await _validate_credentials(self.hass, user_input)
             if errors_result is None:
                 return self.async_create_entry(
@@ -75,13 +108,30 @@ class TuyaBridgeConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema(
+            data_schema=self._build_schema(),
+            errors=errors,
+        )
+
+    def _build_schema(self) -> vol.Schema:
+        """Build form schema — hide device_id if we can auto-detect it."""
+        seed = _find_seed_device_id(self.hass)
+
+        if seed:
+            # Device ID auto-detected, don't ask user
+            return vol.Schema(
                 {
                     vol.Required(CONF_API_KEY): str,
                     vol.Required(CONF_API_SECRET): str,
                     vol.Required(CONF_API_REGION, default="eu"): vol.In(REGIONS),
-                    vol.Required(CONF_API_DEVICE_ID): str,
                 }
-            ),
-            errors=errors,
+            )
+
+        # No existing devices — need device_id from user
+        return vol.Schema(
+            {
+                vol.Required(CONF_API_KEY): str,
+                vol.Required(CONF_API_SECRET): str,
+                vol.Required(CONF_API_REGION, default="eu"): vol.In(REGIONS),
+                vol.Required(CONF_API_DEVICE_ID): str,
+            }
         )

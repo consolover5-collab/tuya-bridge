@@ -14,6 +14,7 @@
     },
     "error": {
       "cannot_connect": "Cannot connect to Tuya Cloud. Check credentials.",
+      "no_devices": "No existing Tuya devices found. Please enter a Device ID manually.",
       "unknown": "Unknown error occurred."
     },
     "abort": {
