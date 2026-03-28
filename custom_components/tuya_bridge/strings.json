@@ -50,6 +50,13 @@
     },
     "error": {
       "invalid_ip": "Please enter a valid IP address."
+    },
+    "abort": {
+      "connection_failed": "Cannot connect to device. Check IP address and ensure device is online.",
+      "tuya_local_already_configured": "This device is already configured in Tuya Local.",
+      "tuya_local_not_supported": "Device type not supported by Tuya Local.",
+      "unexpected_flow_result": "Unexpected result from Tuya Local setup. Check logs for details.",
+      "creation_failed": "Failed to create Tuya Local entry. Check logs for details."
     }
   }
 }

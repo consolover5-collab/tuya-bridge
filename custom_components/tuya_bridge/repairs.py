@@ -152,13 +152,21 @@ class TuyaBridgeRepairFlow(RepairsFlow):
                 "tuya_local", context={"source": "user"}
             )
             flow_id = result["flow_id"]
+            _LOGGER.debug(
+                "tuya_local flow init: type=%s step=%s",
+                result.get("type"), result.get("step_id"),
+            )
 
             # Step 2: Select manual mode
             result = await self.hass.config_entries.flow.async_configure(
                 flow_id, {"setup_mode": "manual"}
             )
+            _LOGGER.debug(
+                "tuya_local after manual: type=%s step=%s",
+                result.get("type"), result.get("step_id"),
+            )
 
-            # Step 3: Submit device details
+            # Step 3: Submit device details — triggers connection test
             result = await self.hass.config_entries.flow.async_configure(
                 flow_id,
                 {
@@ -169,26 +177,51 @@ class TuyaBridgeRepairFlow(RepairsFlow):
                     "poll_only": False,
                 },
             )
+            result_type = str(result.get("type", ""))
+            step_id = result.get("step_id", "")
+            _LOGGER.debug(
+                "tuya_local after device details: type=%s step=%s errors=%s",
+                result_type, step_id, result.get("errors"),
+            )
 
-            if result.get("type") == "abort":
+            # Connection test failed — device unreachable
+            if step_id == "local":
+                _LOGGER.warning(
+                    "tuya_local connection test failed for %s at %s",
+                    self._device_id, host,
+                )
+                return self.async_abort(reason="connection_failed")
+
+            if result_type == "abort":
                 reason = result.get("reason", "unknown")
                 _LOGGER.warning("tuya_local flow aborted: %s", reason)
-                return self.async_abort(reason=f"tuya_local: {reason}")
+                return self.async_abort(reason=f"tuya_local_{reason}")
 
-            if result.get("step_id") == "select_type":
-                # Step 4: Auto-select device type
+            # Step 4: Auto-select device type
+            if step_id in ("select_type", "select_type_auto_detected"):
                 device_type = self._pick_device_type(result, self._category)
+                _LOGGER.debug("Picked device type: %s", device_type)
                 result = await self.hass.config_entries.flow.async_configure(
                     flow_id, {"type": device_type}
                 )
+                step_id = result.get("step_id", "")
+                result_type = str(result.get("type", ""))
+                _LOGGER.debug(
+                    "tuya_local after select_type: type=%s step=%s",
+                    result_type, step_id,
+                )
 
-            if result.get("step_id") == "choose_entities":
-                # Step 5: Set name
+            # Step 5: Set name
+            if step_id == "choose_entities":
                 result = await self.hass.config_entries.flow.async_configure(
                     flow_id, {"name": self._device_name}
                 )
+                result_type = str(result.get("type", ""))
+                _LOGGER.debug(
+                    "tuya_local after choose_entities: type=%s", result_type,
+                )
 
-            if result.get("type") == "create_entry":
+            if result_type == "create_entry":
                 _LOGGER.info(
                     "Successfully created tuya_local entry for %s", self._device_id
                 )
@@ -197,7 +230,10 @@ class TuyaBridgeRepairFlow(RepairsFlow):
                 )
                 return self.async_create_entry(data={"result": "added_locally"})
 
-            _LOGGER.warning("Unexpected flow result: %s", result)
+            _LOGGER.warning(
+                "Unexpected tuya_local flow result: type=%s step=%s result=%s",
+                result_type, step_id, result,
+            )
             return self.async_abort(reason="unexpected_flow_result")
 
         except Exception:
@@ -205,40 +241,51 @@ class TuyaBridgeRepairFlow(RepairsFlow):
             return self.async_abort(reason="creation_failed")
 
     def _pick_device_type(self, flow_result: dict, category: str) -> str:
-        """Pick the best device type from tuya_local's available options."""
-        schema = flow_result.get("data_schema")
+        """Pick the best device type from tuya_local's available options.
+
+        tuya_local uses SelectSelector with compound keys like
+        'config_type||manufacturer||model'. We extract option values
+        from the voluptuous schema's SelectSelector.
+        """
         options: list[str] = []
 
-        if schema:
-            for field in schema.get("schema", []):
-                if field.get("name") == "type":
-                    options = list(field.get("options", {}).keys())
-                    break
-
-        if not options:
-            try:
-                for key in flow_result["data_schema"].schema:
-                    if hasattr(key, "schema") and key.schema == "type":
-                        container = flow_result["data_schema"].schema[key]
-                        if hasattr(container, "container"):
-                            options = list(container.container.keys())
+        try:
+            data_schema = flow_result.get("data_schema")
+            if data_schema and hasattr(data_schema, "schema"):
+                for key in data_schema.schema:
+                    key_name = getattr(key, "schema", None) or str(key)
+                    if key_name == "type":
+                        selector = data_schema.schema[key]
+                        # SelectSelector wraps config with options list
+                        if hasattr(selector, "config"):
+                            sel_options = selector.config.get("options", [])
+                            for opt in sel_options:
+                                if isinstance(opt, dict):
+                                    options.append(opt.get("value", ""))
+                                else:
+                                    options.append(str(opt))
                         break
-            except Exception:
-                pass
+        except Exception:
+            _LOGGER.debug("Failed to extract options from schema", exc_info=True)
 
         if not options:
+            _LOGGER.warning("No device type options found in tuya_local flow")
             return ""
 
-        # Try category hint
+        _LOGGER.debug("Available device types: %s", options)
+
+        # Try category hint — match against the config_type part (before ||)
         hint = CATEGORY_TYPE_HINTS.get(category, "")
         if hint:
             for opt in options:
-                if hint in opt:
+                config_type = opt.split("||")[0] if "||" in opt else opt
+                if hint in config_type:
                     return opt
 
         # Prefer energy monitoring variants
         for opt in options:
-            if "energy" in opt:
+            config_type = opt.split("||")[0] if "||" in opt else opt
+            if "energy" in config_type:
                 return opt
 
         return options[0]

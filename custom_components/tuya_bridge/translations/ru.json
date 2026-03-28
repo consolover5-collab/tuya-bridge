@@ -50,6 +50,13 @@
     },
     "error": {
       "invalid_ip": "Введите корректный IP-адрес."
+    },
+    "abort": {
+      "connection_failed": "Не удалось подключиться к устройству. Проверьте IP-адрес и убедитесь, что устройство включено.",
+      "tuya_local_already_configured": "Это устройство уже настроено в Tuya Local.",
+      "tuya_local_not_supported": "Тип устройства не поддерживается Tuya Local.",
+      "unexpected_flow_result": "Неожиданный результат настройки Tuya Local. Проверьте логи.",
+      "creation_failed": "Не удалось создать запись Tuya Local. Проверьте логи."
     }
   }
 }
