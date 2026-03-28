@@ -25,5 +25,27 @@
       "title": "Новое устройство Tuya: {name}",
       "description": "Устройство **{name}** ({category}) найдено в Tuya Cloud, но отсутствует в Tuya Local.\n\nDevice ID: `{device_id}`\n\n**Добавьте локально** для работы без интернета, или **создайте Cloud Entity** для голосовых ассистентов."
     }
+  },
+  "repairs": {
+    "step": {
+      "init": {
+        "title": "Новое устройство: {name}",
+        "description": "Устройство **{name}** (категория: {category}, ID: `{device_id}`) есть в Tuya Cloud, но не управляется локально.\n\nВыберите действие:",
+        "data": {
+          "action": "Действие"
+        }
+      },
+      "discover": {
+        "title": "Поиск в сети: {name}",
+        "description": "Результат сканирования: **{status}**\n\nПодтвердите или введите IP-адрес устройства:",
+        "data": {
+          "host": "IP-адрес устройства"
+        }
+      },
+      "cloud_stub": {
+        "title": "Cloud Entity: {name}",
+        "description": "Создание Cloud Entity пока недоступно.\n\nЭта функция позволит устройству работать через Яндекс Алису, Alexa и Google Home, даже если оно батарейное и не может управляться локально.\n\n**Скоро будет доступно.**"
+      }
+    }
   }
 }

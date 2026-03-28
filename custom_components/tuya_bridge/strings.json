@@ -25,5 +25,27 @@
       "title": "New Tuya device: {name}",
       "description": "Device **{name}** ({category}) found in Tuya Cloud but not in Tuya Local.\n\nDevice ID: `{device_id}`\n\n**Add locally** for offline control, or **Create Cloud Entity** for voice assistant integration."
     }
+  },
+  "repairs": {
+    "step": {
+      "init": {
+        "title": "New device: {name}",
+        "description": "Device **{name}** (category: {category}, ID: `{device_id}`) is in Tuya Cloud but not controlled locally.\n\nChoose an action:",
+        "data": {
+          "action": "Action"
+        }
+      },
+      "discover": {
+        "title": "Network discovery: {name}",
+        "description": "Network scan result: **{status}**\n\nConfirm or enter the device IP address:",
+        "data": {
+          "host": "Device IP address"
+        }
+      },
+      "cloud_stub": {
+        "title": "Cloud Entity: {name}",
+        "description": "Cloud Entity creation is not yet available.\n\nThis feature will allow the device to be accessible via Yandex Alice, Alexa, and Google Home even when the device is battery-powered and cannot be controlled locally.\n\n**Coming soon.**"
+      }
+    }
   }
 }
