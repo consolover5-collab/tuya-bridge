@@ -20,23 +20,17 @@ _LOGGER = logging.getLogger(__name__)
 class TuyaBridgeRepairFlow(RepairsFlow):
     """Handle repair flow for a new unmanaged Tuya device."""
 
-    def __init__(self) -> None:
-        """Initialize."""
+    def __init__(self, device_id: str) -> None:
+        """Initialize with device_id."""
         super().__init__()
-        self._device_id: str = ""
+        self._device_id = device_id
         self._device_name: str = ""
         self._local_key: str = ""
         self._category: str = ""
         self._discovered_ip: str | None = None
 
-    async def async_step_init(
-        self, user_input: dict[str, Any] | None = None
-    ) -> data_entry_flow.FlowResult:
-        """First step — offer Add Locally or Create Cloud Entity."""
-        issue_id = self.data.get("issue_id", "")
-        self._device_id = issue_id.replace("new_device_", "")
-
-        # Get device info from coordinator
+    def _load_device_info(self) -> None:
+        """Load device info from coordinator."""
         for entry_data in self.hass.data.get(DOMAIN, {}).values():
             coordinator = entry_data.get("coordinator")
             if coordinator and coordinator.data and self._device_id in coordinator.data:
@@ -44,7 +38,13 @@ class TuyaBridgeRepairFlow(RepairsFlow):
                 self._device_name = info.name
                 self._local_key = info.local_key
                 self._category = info.category
-                break
+                return
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> data_entry_flow.FlowResult:
+        """First step — offer Add Locally or Create Cloud Entity."""
+        self._load_device_info()
 
         if user_input is not None:
             action = user_input.get("action")
@@ -53,7 +53,7 @@ class TuyaBridgeRepairFlow(RepairsFlow):
             if action == "cloud_entity":
                 return await self.async_step_cloud_stub()
             if action == "ignore":
-                ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+                ir.async_delete_issue(self.hass, DOMAIN, f"new_device_{self._device_id}")
                 return self.async_create_entry(data={})
 
         return self.async_show_form(
@@ -247,6 +247,9 @@ async def async_create_fix_flow(
     data: dict[str, Any] | None,
 ) -> TuyaBridgeRepairFlow:
     """Create repair flow for a Tuya Bridge issue."""
-    flow = TuyaBridgeRepairFlow()
-    flow.data = {"issue_id": issue_id}
-    return flow
+    device_id = ""
+    if data:
+        device_id = data.get("device_id", "")
+    if not device_id:
+        device_id = issue_id.replace("new_device_", "")
+    return TuyaBridgeRepairFlow(device_id)

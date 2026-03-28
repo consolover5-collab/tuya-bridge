@@ -59,4 +59,5 @@ def _create_issues(hass: HomeAssistant, coordinator: TuyaBridgeCoordinator) -> N
                 "category": device_info.category,
                 "device_id": device_id,
             },
+            data={"device_id": device_id},
         )
