@@ -1,0 +1,29 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Tuya Cloud credentials",
+        "description": "Enter your Tuya IoT Platform credentials (developer.tuya.com).",
+        "data": {
+          "api_key": "Access ID (API Key)",
+          "api_secret": "Access Secret",
+          "api_region": "Region",
+          "api_device_id": "Any Device ID (for API seed)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to Tuya Cloud. Check credentials.",
+      "unknown": "Unknown error occurred."
+    },
+    "abort": {
+      "already_configured": "Tuya Bridge is already configured."
+    }
+  },
+  "issues": {
+    "new_device_found": {
+      "title": "New Tuya device: {name}",
+      "description": "Device **{name}** ({category}) found in Tuya Cloud but not in Tuya Local.\n\nDevice ID: `{device_id}`\n\n**Add locally** for offline control, or **Create Cloud Entity** for voice assistant integration."
+    }
+  }
+}

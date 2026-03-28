@@ -1,0 +1,13 @@
+{
+  "domain": "tuya_bridge",
+  "name": "Tuya Bridge",
+  "codeowners": ["@consolover5-collab"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/consolover5-collab/tuya-bridge",
+  "after_dependencies": ["tuya_local"],
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/consolover5-collab/tuya-bridge/issues",
+  "requirements": ["tinytuya>=1.15.0"],
+  "version": "0.1.0"
+}
