@@ -28,7 +28,9 @@ class TuyaBridgeRepairFlow(RepairsFlow):
         self._device_name: str = ""
         self._local_key: str = ""
         self._category: str = ""
+        self._cloud_ip: str = ""
         self._discovered_ip: str | None = None
+        self._auto_failed: bool = False
 
     def _load_device_info(self) -> None:
         """Load device info from coordinator."""
@@ -39,6 +41,7 @@ class TuyaBridgeRepairFlow(RepairsFlow):
                 self._device_name = info.name
                 self._local_key = info.local_key
                 self._category = info.category
+                self._cloud_ip = info.ip
                 return
 
     async def async_step_init(
@@ -82,40 +85,78 @@ class TuyaBridgeRepairFlow(RepairsFlow):
     async def async_step_discover(
         self, user_input: dict[str, Any] | None = None
     ) -> data_entry_flow.FlowResult:
-        """Scan network for device IP."""
-        if self._discovered_ip is None:
-            self._discovered_ip = await self.hass.async_add_executor_job(
-                self._scan_for_device
-            )
-
+        """Try auto-connect, then scan, then ask user for IP as fallback."""
+        # If user submitted the manual form
         if user_input is not None:
             ip = user_input.get("host", "").strip()
             if ip:
-                return await self._create_tuya_local_entry(ip)
-            return self.async_show_form(
-                step_id="discover",
-                data_schema=vol.Schema(
-                    {
-                        vol.Required("host", default=""): str,
-                    }
-                ),
-                errors={"host": "invalid_ip"},
-                description_placeholders={
-                    "name": self._device_name,
-                    "status": "Please enter a valid IP address",
-                },
+                result = await self._create_tuya_local_entry(ip)
+                if result.get("type") != "abort":
+                    return result
+                # Connection failed — show form again with error
+                return self._show_discover_form(
+                    default_ip=ip,
+                    error="connection_failed",
+                    status=f"Connection to {ip} failed",
+                )
+            return self._show_discover_form(
+                default_ip="",
+                error="invalid_ip",
+                status="Please enter a valid IP address",
             )
 
+        # First attempt: try cloud IP automatically (no form shown)
+        if not self._auto_failed and self._cloud_ip:
+            _LOGGER.info(
+                "Trying cloud IP %s for device %s", self._cloud_ip, self._device_id,
+            )
+            result = await self._create_tuya_local_entry(self._cloud_ip)
+            if result.get("type") != "abort":
+                return result
+            _LOGGER.info("Cloud IP %s failed, trying UDP scan", self._cloud_ip)
+
+        # Second attempt: UDP scan
+        if self._discovered_ip is None and not self._auto_failed:
+            self._discovered_ip = await self.hass.async_add_executor_job(
+                self._scan_for_device
+            )
+            if self._discovered_ip and self._discovered_ip != self._cloud_ip:
+                _LOGGER.info(
+                    "Trying scanned IP %s for device %s",
+                    self._discovered_ip, self._device_id,
+                )
+                result = await self._create_tuya_local_entry(self._discovered_ip)
+                if result.get("type") != "abort":
+                    return result
+                _LOGGER.info("Scanned IP %s also failed", self._discovered_ip)
+
+        # All auto methods failed — show manual form
+        self._auto_failed = True
+        best_ip = self._discovered_ip or self._cloud_ip or ""
+        return self._show_discover_form(
+            default_ip=best_ip,
+            status=f"Auto-connect failed (tried {self._cloud_ip or 'no cloud IP'}). Enter IP manually:",
+        )
+
+    def _show_discover_form(
+        self,
+        default_ip: str = "",
+        error: str | None = None,
+        status: str = "",
+    ) -> data_entry_flow.FlowResult:
+        """Show the manual IP entry form."""
+        errors = {}
+        if error:
+            errors["host"] = error
         return self.async_show_form(
             step_id="discover",
             data_schema=vol.Schema(
-                {
-                    vol.Required("host", default=self._discovered_ip or ""): str,
-                }
+                {vol.Required("host", default=default_ip): str}
             ),
+            errors=errors,
             description_placeholders={
                 "name": self._device_name,
-                "status": "Found!" if self._discovered_ip else "Not found — enter manually",
+                "status": status,
             },
         )
 
@@ -145,28 +186,28 @@ class TuyaBridgeRepairFlow(RepairsFlow):
         return None
 
     async def _create_tuya_local_entry(self, host: str) -> data_entry_flow.FlowResult:
-        """Programmatically create a tuya_local config entry via its config flow."""
+        """Programmatically create a tuya_local config entry via its config flow.
+
+        Returns abort result on failure (caller can retry with different IP)
+        or create_entry on success.
+        """
         try:
             # Step 1: Init flow
             result = await self.hass.config_entries.flow.async_init(
                 "tuya_local", context={"source": "user"}
             )
             flow_id = result["flow_id"]
-            _LOGGER.debug(
-                "tuya_local flow init: type=%s step=%s",
-                result.get("type"), result.get("step_id"),
-            )
 
             # Step 2: Select manual mode
             result = await self.hass.config_entries.flow.async_configure(
                 flow_id, {"setup_mode": "manual"}
             )
-            _LOGGER.debug(
-                "tuya_local after manual: type=%s step=%s",
-                result.get("type"), result.get("step_id"),
-            )
 
             # Step 3: Submit device details — triggers connection test
+            _LOGGER.info(
+                "Testing connection to %s at %s (key: %s...)",
+                self._device_id, host, self._local_key[:4] if self._local_key else "?",
+            )
             result = await self.hass.config_entries.flow.async_configure(
                 flow_id,
                 {
@@ -179,16 +220,15 @@ class TuyaBridgeRepairFlow(RepairsFlow):
             )
             result_type = str(result.get("type", ""))
             step_id = result.get("step_id", "")
-            _LOGGER.debug(
-                "tuya_local after device details: type=%s step=%s errors=%s",
+            _LOGGER.info(
+                "tuya_local result: type=%s step=%s errors=%s",
                 result_type, step_id, result.get("errors"),
             )
 
             # Connection test failed — device unreachable
             if step_id == "local":
                 _LOGGER.warning(
-                    "tuya_local connection test failed for %s at %s",
-                    self._device_id, host,
+                    "Connection failed for %s at %s", self._device_id, host,
                 )
                 return self.async_abort(reason="connection_failed")
 
@@ -200,16 +240,12 @@ class TuyaBridgeRepairFlow(RepairsFlow):
             # Step 4: Auto-select device type
             if step_id in ("select_type", "select_type_auto_detected"):
                 device_type = self._pick_device_type(result, self._category)
-                _LOGGER.debug("Picked device type: %s", device_type)
+                _LOGGER.info("Auto-selected device type: %s", device_type)
                 result = await self.hass.config_entries.flow.async_configure(
                     flow_id, {"type": device_type}
                 )
                 step_id = result.get("step_id", "")
                 result_type = str(result.get("type", ""))
-                _LOGGER.debug(
-                    "tuya_local after select_type: type=%s step=%s",
-                    result_type, step_id,
-                )
 
             # Step 5: Set name
             if step_id == "choose_entities":
@@ -217,13 +253,10 @@ class TuyaBridgeRepairFlow(RepairsFlow):
                     flow_id, {"name": self._device_name}
                 )
                 result_type = str(result.get("type", ""))
-                _LOGGER.debug(
-                    "tuya_local after choose_entities: type=%s", result_type,
-                )
 
             if result_type == "create_entry":
                 _LOGGER.info(
-                    "Successfully created tuya_local entry for %s", self._device_id
+                    "Created tuya_local entry for %s at %s", self._device_id, host,
                 )
                 ir.async_delete_issue(
                     self.hass, DOMAIN, f"new_device_{self._device_id}"
@@ -231,13 +264,12 @@ class TuyaBridgeRepairFlow(RepairsFlow):
                 return self.async_create_entry(data={"result": "added_locally"})
 
             _LOGGER.warning(
-                "Unexpected tuya_local flow result: type=%s step=%s result=%s",
-                result_type, step_id, result,
+                "Unexpected tuya_local flow: type=%s step=%s", result_type, step_id,
             )
             return self.async_abort(reason="unexpected_flow_result")
 
         except Exception:
-            _LOGGER.exception("Failed to create tuya_local entry")
+            _LOGGER.exception("Failed to create tuya_local entry for %s", host)
             return self.async_abort(reason="creation_failed")
 
     def _pick_device_type(self, flow_result: dict, category: str) -> str:

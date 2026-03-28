@@ -49,7 +49,8 @@
       }
     },
     "error": {
-      "invalid_ip": "Please enter a valid IP address."
+      "invalid_ip": "Please enter a valid IP address.",
+      "connection_failed": "Could not connect to device at this IP. Check the address or try another."
     },
     "abort": {
       "connection_failed": "Cannot connect to device. Check IP address and ensure device is online.",

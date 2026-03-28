@@ -34,6 +34,7 @@ class TuyaDeviceInfo:
     category: str
     local_key: str
     sub: bool
+    ip: str = ""
 
 
 class TuyaBridgeCoordinator(DataUpdateCoordinator[dict[str, TuyaDeviceInfo]]):
@@ -104,6 +105,7 @@ class TuyaBridgeCoordinator(DataUpdateCoordinator[dict[str, TuyaDeviceInfo]]):
                 category=category,
                 local_key=dev.get("local_key", dev.get("key", "")),
                 sub=sub,
+                ip=dev.get("ip", ""),
             )
 
         _LOGGER.info(
