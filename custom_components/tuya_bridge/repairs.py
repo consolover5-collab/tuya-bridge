@@ -28,7 +28,6 @@ class TuyaBridgeRepairFlow(RepairsFlow):
         self._device_name: str = ""
         self._local_key: str = ""
         self._category: str = ""
-        self._cloud_ip: str = ""
         self._discovered_ip: str | None = None
         self._auto_failed: bool = False
 
@@ -41,7 +40,6 @@ class TuyaBridgeRepairFlow(RepairsFlow):
                 self._device_name = info.name
                 self._local_key = info.local_key
                 self._category = info.category
-                self._cloud_ip = info.ip
                 return
 
     async def async_step_init(
@@ -85,13 +83,13 @@ class TuyaBridgeRepairFlow(RepairsFlow):
     async def async_step_discover(
         self, user_input: dict[str, Any] | None = None
     ) -> data_entry_flow.FlowResult:
-        """Try auto-connect, then scan, then ask user for IP as fallback."""
-        # If user submitted the manual form
+        """UDP scan → auto-connect if found, otherwise ask user for IP."""
+        # User submitted the manual form
         if user_input is not None:
             ip = user_input.get("host", "").strip()
             if ip:
                 result = await self._create_tuya_local_entry(ip)
-                if result.get("type") != "abort":
+                if str(result.get("type", "")) != "abort":
                     return result
                 # Connection failed — show form again with error
                 return self._show_discover_form(
@@ -102,52 +100,45 @@ class TuyaBridgeRepairFlow(RepairsFlow):
             return self._show_discover_form(
                 default_ip="",
                 error="invalid_ip",
-                status="Please enter a valid IP address",
             )
 
-        # First attempt: try cloud IP automatically (no form shown)
-        if not self._auto_failed and self._cloud_ip:
-            _LOGGER.info(
-                "Trying cloud IP %s for device %s", self._cloud_ip, self._device_id,
-            )
-            result = await self._create_tuya_local_entry(self._cloud_ip)
-            if result.get("type") != "abort":
-                return result
-            _LOGGER.info("Cloud IP %s failed, trying UDP scan", self._cloud_ip)
-
-        # Second attempt: UDP scan
-        if self._discovered_ip is None and not self._auto_failed:
+        # First visit: UDP scan
+        if self._discovered_ip is None:
             self._discovered_ip = await self.hass.async_add_executor_job(
                 self._scan_for_device
             )
-            if self._discovered_ip and self._discovered_ip != self._cloud_ip:
-                _LOGGER.info(
-                    "Trying scanned IP %s for device %s",
-                    self._discovered_ip, self._device_id,
-                )
-                result = await self._create_tuya_local_entry(self._discovered_ip)
-                if result.get("type") != "abort":
-                    return result
-                _LOGGER.info("Scanned IP %s also failed", self._discovered_ip)
 
-        # All auto methods failed — show manual form
-        self._auto_failed = True
-        best_ip = self._discovered_ip or self._cloud_ip or ""
+        # Auto-connect if scan found the device
+        if self._discovered_ip and not self._auto_failed:
+            _LOGGER.info(
+                "Auto-connecting %s at %s", self._device_id, self._discovered_ip,
+            )
+            result = await self._create_tuya_local_entry(self._discovered_ip)
+            if str(result.get("type", "")) != "abort":
+                return result
+            _LOGGER.warning("Auto-connect to %s failed", self._discovered_ip)
+            self._auto_failed = True
+
+        # Show manual form
         return self._show_discover_form(
-            default_ip=best_ip,
-            status=f"Auto-connect failed (tried {self._cloud_ip or 'no cloud IP'}). Enter IP manually:",
+            default_ip=self._discovered_ip or "",
         )
 
     def _show_discover_form(
         self,
         default_ip: str = "",
         error: str | None = None,
-        status: str = "",
+        status: str | None = None,
     ) -> data_entry_flow.FlowResult:
         """Show the manual IP entry form."""
         errors = {}
         if error:
             errors["host"] = error
+        if status is None:
+            if default_ip:
+                status = f"Found: {default_ip}"
+            else:
+                status = "Not found"
         return self.async_show_form(
             step_id="discover",
             data_schema=vol.Schema(

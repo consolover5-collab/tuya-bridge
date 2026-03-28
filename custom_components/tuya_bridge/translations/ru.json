@@ -38,7 +38,7 @@
       },
       "discover": {
         "title": "Поиск в сети: {name}",
-        "description": "Результат сканирования: **{status}**\n\nПодтвердите или введите IP-адрес устройства:",
+        "description": "UDP-сканирование: **{status}**\n\nВведите локальный IP-адрес устройства.\n\nГде найти IP: Tuya Smart → устройство → значок карандаша → Device Information → IP Address. Или в настройках роутера (DHCP).",
         "data": {
           "host": "IP-адрес устройства"
         }

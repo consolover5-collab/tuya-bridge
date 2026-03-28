@@ -38,7 +38,7 @@
       },
       "discover": {
         "title": "Network discovery: {name}",
-        "description": "Network scan result: **{status}**\n\nConfirm or enter the device IP address:",
+        "description": "UDP scan: **{status}**\n\nEnter the device's local IP address.\n\nWhere to find IP: Tuya Smart app → device → pencil icon → Device Information → IP Address. Or check your router's DHCP table.",
         "data": {
           "host": "Device IP address"
         }
