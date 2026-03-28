@@ -29,6 +29,7 @@ class TuyaBridgeRepairFlow(RepairsFlow):
         self._local_key: str = ""
         self._category: str = ""
         self._discovered_ip: str | None = None
+        self._scan_results: dict[str, dict] | None = None
         self._auto_failed: bool = False
 
     def _load_device_info(self) -> None:
@@ -83,32 +84,25 @@ class TuyaBridgeRepairFlow(RepairsFlow):
     async def async_step_discover(
         self, user_input: dict[str, Any] | None = None
     ) -> data_entry_flow.FlowResult:
-        """UDP scan → auto-connect if found, otherwise ask user for IP."""
-        # User submitted the manual form
+        """UDP scan → auto-connect if found, pick from list, or manual IP."""
+        # User submitted the pick/manual form
         if user_input is not None:
             ip = user_input.get("host", "").strip()
-            if ip:
-                result = await self._create_tuya_local_entry(ip)
-                if str(result.get("type", "")) != "abort":
-                    return result
-                # Connection failed — show form again with error
-                return self._show_discover_form(
-                    default_ip=ip,
-                    error="connection_failed",
-                    status=f"Connection to {ip} failed",
-                )
-            return self._show_discover_form(
-                default_ip="",
-                error="invalid_ip",
+            if not ip:
+                return self._show_pick_form(error="invalid_ip")
+            result = await self._create_tuya_local_entry(ip)
+            if str(result.get("type", "")) != "abort":
+                return result
+            # Connection failed — show form again with error
+            return self._show_pick_form(error="connection_failed")
+
+        # First visit: full network scan
+        if self._scan_results is None:
+            self._scan_results = await self.hass.async_add_executor_job(
+                self._scan_network
             )
 
-        # First visit: UDP scan
-        if self._discovered_ip is None:
-            self._discovered_ip = await self.hass.async_add_executor_job(
-                self._scan_for_device
-            )
-
-        # Auto-connect if scan found the device
+        # Exact match by device_id → auto-connect
         if self._discovered_ip and not self._auto_failed:
             _LOGGER.info(
                 "Auto-connecting %s at %s", self._device_id, self._discovered_ip,
@@ -119,26 +113,58 @@ class TuyaBridgeRepairFlow(RepairsFlow):
             _LOGGER.warning("Auto-connect to %s failed", self._discovered_ip)
             self._auto_failed = True
 
-        # Show manual form
-        return self._show_discover_form(
-            default_ip=self._discovered_ip or "",
-        )
+        # Show picker: other devices found or manual entry
+        return self._show_pick_form()
 
-    def _show_discover_form(
-        self,
-        default_ip: str = "",
-        error: str | None = None,
-        status: str | None = None,
+    def _show_pick_form(
+        self, error: str | None = None,
     ) -> data_entry_flow.FlowResult:
-        """Show the manual IP entry form."""
+        """Show form to pick from discovered devices or enter IP manually."""
         errors = {}
         if error:
             errors["host"] = error
-        if status is None:
-            if default_ip:
-                status = f"Found: {default_ip}"
-            else:
-                status = "Not found"
+
+        # Build options from scan results (excluding already-managed devices)
+        managed_ids = set()
+        for entry in self.hass.config_entries.async_entries("tuya_local"):
+            did = entry.data.get("device_id", "")
+            if did:
+                managed_ids.add(did)
+
+        options: list[SelectOptionDict] = []
+        default_ip = self._discovered_ip or ""
+        if self._scan_results:
+            for dev_id, info in self._scan_results.items():
+                if dev_id in managed_ids:
+                    continue
+                ip = info.get("ip", "")
+                ver = info.get("version", "?")
+                label = f"{ip} (id: ...{dev_id[-6:]}, v{ver})"
+                options.append(SelectOptionDict(value=ip, label=label))
+
+        if options:
+            # Dropdown with discovered devices
+            found = len(options)
+            return self.async_show_form(
+                step_id="discover",
+                data_schema=vol.Schema(
+                    {
+                        vol.Required("host", default=default_ip): SelectSelector(
+                            SelectSelectorConfig(
+                                options=options,
+                                custom_value=True,
+                            )
+                        ),
+                    }
+                ),
+                errors=errors,
+                description_placeholders={
+                    "name": self._device_name,
+                    "status": f"Found {found} unmanaged device(s) on network",
+                },
+            )
+
+        # No devices found — plain text input
         return self.async_show_form(
             step_id="discover",
             data_schema=vol.Schema(
@@ -147,7 +173,7 @@ class TuyaBridgeRepairFlow(RepairsFlow):
             errors=errors,
             description_placeholders={
                 "name": self._device_name,
-                "status": status,
+                "status": "No devices found on network",
             },
         )
 
@@ -164,17 +190,24 @@ class TuyaBridgeRepairFlow(RepairsFlow):
             description_placeholders={"name": self._device_name},
         )
 
-    def _scan_for_device(self) -> str | None:
-        """Scan local network for device using tinytuya UDP broadcast."""
-        _LOGGER.info("Scanning network for device %s...", self._device_id)
+    def _scan_network(self) -> dict[str, dict]:
+        """Scan local network for ALL Tuya devices via UDP broadcast."""
+        _LOGGER.info("Scanning network for Tuya devices (looking for %s)...", self._device_id)
         try:
-            result = tinytuya.find_device(dev_id=self._device_id, timeout=18)
-            if result and result.get("ip"):
-                _LOGGER.info("Found device %s at %s", self._device_id, result["ip"])
-                return result["ip"]
+            devices = tinytuya.deviceScan(verbose=False, maxretry=3)
+            _LOGGER.info("Network scan found %d Tuya device(s)", len(devices))
+            # Check if our target device is among them
+            for dev_id, info in devices.items():
+                if dev_id == self._device_id:
+                    self._discovered_ip = info.get("ip")
+                    _LOGGER.info(
+                        "Target device %s found at %s", self._device_id, self._discovered_ip,
+                    )
+                    break
+            return devices
         except Exception:
-            _LOGGER.exception("Network scan failed for %s", self._device_id)
-        return None
+            _LOGGER.exception("Network scan failed")
+            return {}
 
     async def _create_tuya_local_entry(self, host: str) -> data_entry_flow.FlowResult:
         """Programmatically create a tuya_local config entry via its config flow.
