@@ -46,6 +46,9 @@
         "title": "Cloud Entity: {name}",
         "description": "Cloud Entity creation is not yet available.\n\nThis feature will allow the device to be accessible via Yandex Alice, Alexa, and Google Home even when the device is battery-powered and cannot be controlled locally.\n\n**Coming soon.**"
       }
+    },
+    "error": {
+      "invalid_ip": "Please enter a valid IP address."
     }
   }
 }

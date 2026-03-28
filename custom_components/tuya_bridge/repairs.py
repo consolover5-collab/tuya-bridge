@@ -91,7 +91,16 @@ class TuyaBridgeRepairFlow(RepairsFlow):
                 return await self._create_tuya_local_entry(ip)
             return self.async_show_form(
                 step_id="discover",
+                data_schema=vol.Schema(
+                    {
+                        vol.Required("host", default=""): str,
+                    }
+                ),
                 errors={"host": "invalid_ip"},
+                description_placeholders={
+                    "name": self._device_name,
+                    "status": "Please enter a valid IP address",
+                },
             )
 
         return self.async_show_form(
