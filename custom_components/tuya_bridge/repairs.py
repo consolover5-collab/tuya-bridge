@@ -32,6 +32,7 @@ class TuyaBridgeRepairFlow(RepairsFlow):
         self._scan_results: dict[str, dict] | None = None
         self._auto_failed: bool = False
         self._connected_host: str = ""
+        self._selected_type: str = ""
 
     def _load_device_info(self) -> None:
         """Load device info from coordinator."""
@@ -325,6 +326,7 @@ class TuyaBridgeRepairFlow(RepairsFlow):
             # Step 4: Auto-select device type
             if step_id in ("select_type", "select_type_auto_detected"):
                 device_type = self._pick_device_type(result, self._category)
+                self._selected_type = device_type
                 _LOGGER.info("Auto-selected device type: %s", device_type)
                 result = await self.hass.config_entries.flow.async_configure(
                     flow_id, {"type": device_type}
@@ -364,12 +366,27 @@ class TuyaBridgeRepairFlow(RepairsFlow):
         """Show success confirmation after device was added to tuya_local."""
         if user_input is not None:
             return self.async_create_entry(data={"result": "added_locally"})
+
+        # Warn if a basic plug config was picked instead of an energy-aware one
+        energy_categories = {"cz", "pc"}
+        selected_has_energy = "energy" in self._selected_type
+        show_energy_warning = (
+            self._category in energy_categories and not selected_has_energy
+        )
+
         return self.async_show_form(
             step_id="success",
             data_schema=vol.Schema({}),
             description_placeholders={
                 "name": self._device_name,
                 "host": self._connected_host,
+                "energy_note": (
+                    "\n\n⚠️ Energy monitoring sensors may be missing — "
+                    "if needed, reconfigure via Tuya Local settings and select "
+                    "an 'Energy monitoring smartplug' type."
+                )
+                if show_energy_warning
+                else "",
             },
         )
 
@@ -405,22 +422,28 @@ class TuyaBridgeRepairFlow(RepairsFlow):
             _LOGGER.warning("No device type options found in tuya_local flow")
             return ""
 
-        _LOGGER.debug("Available device types: %s", options)
+        _LOGGER.debug("Available device types (%d): %s", len(options), options)
 
-        # Try category hint — match against the config_type part (before ||)
+        # 1. Energy monitoring variants take priority — prevent picking basic
+        #    configs (e.g. smartplug_with_childlock) over energy-capable ones.
+        #    Category hint used to come first, causing "smartplug" to match
+        #    smartplug_with_childlock before smartplugv2_energyv2 was checked.
+        for opt in options:
+            config_type = opt.split("||")[0] if "||" in opt else opt
+            if "energy" in config_type:
+                _LOGGER.debug("Picked energy variant: %s", opt)
+                return opt
+
+        # 2. Category hint fallback
         hint = CATEGORY_TYPE_HINTS.get(category, "")
         if hint:
             for opt in options:
                 config_type = opt.split("||")[0] if "||" in opt else opt
                 if hint in config_type:
+                    _LOGGER.debug("Picked by category hint '%s': %s", hint, opt)
                     return opt
 
-        # Prefer energy monitoring variants
-        for opt in options:
-            config_type = opt.split("||")[0] if "||" in opt else opt
-            if "energy" in config_type:
-                return opt
-
+        _LOGGER.debug("Falling back to first option: %s", options[0])
         return options[0]
 
 

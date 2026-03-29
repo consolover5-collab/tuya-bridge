@@ -45,7 +45,7 @@
       },
       "success": {
         "title": "Устройство добавлено: {name}",
-        "description": "**{name}** успешно добавлено в Tuya Local по IP `{host}`.\n\nУстройство теперь управляется локально, без интернета."
+        "description": "**{name}** успешно добавлено в Tuya Local по IP `{host}`.\n\nУстройство теперь управляется локально, без интернета.{energy_note}"
       },
       "cloud_stub": {
         "title": "Cloud Entity: {name}",
