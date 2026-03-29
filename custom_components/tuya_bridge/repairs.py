@@ -124,7 +124,7 @@ class TuyaBridgeRepairFlow(RepairsFlow):
         if error:
             errors["host"] = error
 
-        # Build options from scan results (excluding already-managed devices)
+        # Build options from scan results (keyed by device_id via byID=True)
         managed_ids = set()
         for entry in self.hass.config_entries.async_entries("tuya_local"):
             did = entry.data.get("device_id", "")
@@ -138,13 +138,23 @@ class TuyaBridgeRepairFlow(RepairsFlow):
                 if dev_id in managed_ids:
                     continue
                 ip = info.get("ip", "")
+                if not ip:
+                    continue
                 ver = info.get("version", "?")
-                label = f"{ip} (id: ...{dev_id[-6:]}, v{ver})"
+                # Highlight if this matches our target device
+                if dev_id == self._device_id:
+                    label = f"✓ {ip} — THIS DEVICE (...{dev_id[-8:]}, v{ver})"
+                else:
+                    label = f"{ip} — other device (...{dev_id[-8:]}, v{ver})"
                 options.append(SelectOptionDict(value=ip, label=label))
 
+        target_found = self._discovered_ip is not None
+
         if options:
-            # Dropdown with discovered devices
-            found = len(options)
+            if target_found:
+                status = f"Device found at {self._discovered_ip} — confirm below"
+            else:
+                status = f"Target device not found on network — select another or enter IP manually"
             return self.async_show_form(
                 step_id="discover",
                 data_schema=vol.Schema(
@@ -160,11 +170,11 @@ class TuyaBridgeRepairFlow(RepairsFlow):
                 errors=errors,
                 description_placeholders={
                     "name": self._device_name,
-                    "status": f"Found {found} unmanaged device(s) on network",
+                    "status": status,
                 },
             )
 
-        # No devices found — plain text input
+        # No devices found at all — plain text input
         return self.async_show_form(
             step_id="discover",
             data_schema=vol.Schema(
@@ -173,7 +183,7 @@ class TuyaBridgeRepairFlow(RepairsFlow):
             errors=errors,
             description_placeholders={
                 "name": self._device_name,
-                "status": "No devices found on network",
+                "status": "No Tuya devices found on network — enter IP manually",
             },
         )
 
@@ -191,19 +201,27 @@ class TuyaBridgeRepairFlow(RepairsFlow):
         )
 
     def _scan_network(self) -> dict[str, dict]:
-        """Scan local network for ALL Tuya devices via UDP broadcast."""
+        """Scan local network for ALL Tuya devices via UDP broadcast.
+
+        Returns dict keyed by device_id (byID=True), value has 'ip' field.
+        """
         _LOGGER.info("Scanning network for Tuya devices (looking for %s)...", self._device_id)
         try:
-            devices = tinytuya.deviceScan(verbose=False, maxretry=3)
-            _LOGGER.info("Network scan found %d Tuya device(s)", len(devices))
+            # byID=True → keys are device IDs, not IPs
+            devices = tinytuya.deviceScan(verbose=False, maxretry=3, byID=True)
+            _LOGGER.info(
+                "Network scan found %d Tuya device(s): %s",
+                len(devices),
+                {did: info.get("ip") for did, info in devices.items()},
+            )
             # Check if our target device is among them
-            for dev_id, info in devices.items():
-                if dev_id == self._device_id:
-                    self._discovered_ip = info.get("ip")
-                    _LOGGER.info(
-                        "Target device %s found at %s", self._device_id, self._discovered_ip,
-                    )
-                    break
+            if self._device_id in devices:
+                self._discovered_ip = devices[self._device_id].get("ip")
+                _LOGGER.info(
+                    "Target device %s found at %s", self._device_id, self._discovered_ip,
+                )
+            else:
+                _LOGGER.warning("Target device %s NOT found in scan", self._device_id)
             return devices
         except Exception:
             _LOGGER.exception("Network scan failed")
