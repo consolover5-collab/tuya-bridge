@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 import tinytuya
@@ -16,6 +17,9 @@ from homeassistant.helpers.selector import SelectSelector, SelectSelectorConfig,
 from .const import CATEGORY_TYPE_HINTS, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+
+_SCAN_CACHE_KEY = "network_scan_cache"
+_SCAN_CACHE_TTL = 90  # seconds — shared across concurrent repair flows
 
 
 class TuyaBridgeRepairFlow(RepairsFlow):
@@ -98,11 +102,29 @@ class TuyaBridgeRepairFlow(RepairsFlow):
             # Connection failed — show form again with error
             return self._show_pick_form(error="connection_failed")
 
-        # First visit: full network scan
+        # First visit: use shared scan cache or run a fresh scan
         if self._scan_results is None:
-            self._scan_results = await self.hass.async_add_executor_job(
-                self._scan_network
-            )
+            domain_data = self.hass.data.setdefault(DOMAIN, {})
+            cache = domain_data.get(_SCAN_CACHE_KEY)
+            age = time.monotonic() - cache["ts"] if cache else _SCAN_CACHE_TTL + 1
+
+            if cache and age < _SCAN_CACHE_TTL:
+                _LOGGER.info(
+                    "Reusing network scan cache (%.0fs old, TTL %ds)",
+                    age, _SCAN_CACHE_TTL,
+                )
+                self._scan_results = cache["results"]
+                # Resolve this device's IP from cached results
+                if self._device_id in self._scan_results:
+                    self._discovered_ip = self._scan_results[self._device_id].get("ip")
+            else:
+                self._scan_results = await self.hass.async_add_executor_job(
+                    self._scan_network
+                )
+                domain_data[_SCAN_CACHE_KEY] = {
+                    "results": self._scan_results,
+                    "ts": time.monotonic(),
+                }
 
         # Exact match by device_id → auto-connect
         if self._discovered_ip and not self._auto_failed:
