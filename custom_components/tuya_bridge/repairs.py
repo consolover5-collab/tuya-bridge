@@ -135,17 +135,22 @@ class TuyaBridgeRepairFlow(RepairsFlow):
         default_ip = self._discovered_ip or ""
         if self._scan_results:
             for dev_id, info in self._scan_results.items():
-                if dev_id in managed_ids:
+                # dev_id may be real device_id (UDP) or IP (TCP fallback)
+                real_id = info.get("id", "") or dev_id
+                if real_id in managed_ids:
                     continue
-                ip = info.get("ip", "")
+                ip = info.get("ip", "") or dev_id
                 if not ip:
                     continue
                 ver = info.get("version", "?")
-                # Highlight if this matches our target device
-                if dev_id == self._device_id:
-                    label = f"✓ {ip} — THIS DEVICE (...{dev_id[-8:]}, v{ver})"
+                origin = info.get("origin", "udp")
+                origin_tag = "" if origin != "tcp_scan" else " [tcp]"
+                if real_id == self._device_id:
+                    label = f"✓ {ip} — THIS DEVICE (...{real_id[-8:]}, v{ver})"
+                elif real_id and real_id != ip:
+                    label = f"{ip} — ...{real_id[-8:]} v{ver}{origin_tag}"
                 else:
-                    label = f"{ip} — other device (...{dev_id[-8:]}, v{ver})"
+                    label = f"{ip} — unknown device{origin_tag}"
                 options.append(SelectOptionDict(value=ip, label=label))
 
         target_found = self._discovered_ip is not None
@@ -201,31 +206,68 @@ class TuyaBridgeRepairFlow(RepairsFlow):
         )
 
     def _scan_network(self) -> dict[str, dict]:
-        """Scan local network for ALL Tuya devices via UDP broadcast.
+        """Scan local network for Tuya devices.
 
-        Returns dict keyed by device_id (byID=True), value has 'ip' field.
+        1. UDP broadcast scan (byID=True → keys are device IDs)
+        2. TCP port 6668 scan to catch devices that don't broadcast
+        Returns combined dict keyed by device_id where known, else by IP.
         """
+        import concurrent.futures
+        import socket as _socket
+
         _LOGGER.info("Scanning network for Tuya devices (looking for %s)...", self._device_id)
+        result: dict[str, dict] = {}
+
+        # Step 1: UDP broadcast
         try:
-            # byID=True → keys are device IDs, not IPs
-            devices = tinytuya.deviceScan(verbose=False, maxretry=3, byID=True)
-            _LOGGER.info(
-                "Network scan found %d Tuya device(s): %s",
-                len(devices),
-                {did: info.get("ip") for did, info in devices.items()},
-            )
-            # Check if our target device is among them
-            if self._device_id in devices:
-                self._discovered_ip = devices[self._device_id].get("ip")
-                _LOGGER.info(
-                    "Target device %s found at %s", self._device_id, self._discovered_ip,
-                )
-            else:
-                _LOGGER.warning("Target device %s NOT found in scan", self._device_id)
-            return devices
+            udp_devices = tinytuya.deviceScan(verbose=False, maxretry=3, byID=True)
+            _LOGGER.info("UDP scan found %d device(s): %s",
+                         len(udp_devices),
+                         {did: info.get("ip") for did, info in udp_devices.items()})
+            result.update(udp_devices)
+            if self._device_id in result:
+                self._discovered_ip = result[self._device_id].get("ip")
         except Exception:
-            _LOGGER.exception("Network scan failed")
-            return {}
+            _LOGGER.exception("UDP scan failed")
+
+        # Step 2: TCP port 6668 scan for devices silent on UDP
+        # Determine local subnet from known IPs
+        known_ips = {info.get("ip") for info in result.values() if info.get("ip")}
+        udp_ips = known_ips.copy()
+        try:
+            # Detect subnet from HA's own IP
+            import socket
+            local_ip = socket.gethostbyname(socket.gethostname())
+            subnet_prefix = ".".join(local_ip.split(".")[:3])
+        except Exception:
+            subnet_prefix = "192.168.50"
+
+        def tcp_check(i: int) -> str | None:
+            ip = f"{subnet_prefix}.{i}"
+            try:
+                s = _socket.socket()
+                s.settimeout(0.3)
+                s.connect((ip, 6668))
+                s.close()
+                return ip
+            except Exception:
+                return None
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=64) as ex:
+            tcp_found = [ip for ip in ex.map(tcp_check, range(1, 255)) if ip]
+
+        _LOGGER.info("TCP port 6668 scan found %d device(s): %s", len(tcp_found), tcp_found)
+
+        # Add TCP-found IPs not already in results (keyed by IP since no device_id)
+        udp_result_ips = {info.get("ip") for info in result.values()}
+        for ip in tcp_found:
+            if ip not in udp_result_ips:
+                result[ip] = {"ip": ip, "id": "", "version": "?", "origin": "tcp_scan"}
+
+        if self._device_id not in result:
+            _LOGGER.warning("Target %s not found by UDP; showing %d total candidates",
+                            self._device_id, len(result))
+        return result
 
     async def _create_tuya_local_entry(self, host: str) -> data_entry_flow.FlowResult:
         """Programmatically create a tuya_local config entry via its config flow.
