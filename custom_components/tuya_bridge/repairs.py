@@ -38,6 +38,22 @@ class TuyaBridgeRepairFlow(RepairsFlow):
         self._connected_host: str = ""
         self._selected_type: str = ""
 
+    def _persist_ignore(self) -> None:
+        """Add device_id to the ignored list in the config entry options."""
+        for entry_data in self.hass.data.get(DOMAIN, {}).values():
+            coordinator = entry_data.get("coordinator")
+            if not coordinator:
+                continue
+            entry = coordinator.config_entry
+            ignored = list(entry.options.get("ignored_devices", []))
+            if self._device_id not in ignored:
+                ignored.append(self._device_id)
+                self.hass.config_entries.async_update_entry(
+                    entry, options={**entry.options, "ignored_devices": ignored}
+                )
+                _LOGGER.info("Device %s added to ignore list", self._device_id)
+            return
+
     def _load_device_info(self) -> None:
         """Load device info from coordinator."""
         for entry_data in self.hass.data.get(DOMAIN, {}).values():
@@ -63,6 +79,7 @@ class TuyaBridgeRepairFlow(RepairsFlow):
                 return await self.async_step_cloud_stub()
             if action == "ignore":
                 ir.async_delete_issue(self.hass, DOMAIN, f"new_device_{self._device_id}")
+                self._persist_ignore()
                 return self.async_create_entry(data={})
 
         return self.async_show_form(

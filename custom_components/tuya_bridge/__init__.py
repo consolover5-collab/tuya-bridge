@@ -45,7 +45,11 @@ def _create_issues(hass: HomeAssistant, coordinator: TuyaBridgeCoordinator) -> N
     if not coordinator.data:
         return
 
+    ignored: set[str] = set(coordinator.config_entry.options.get("ignored_devices", []))
+
     for device_id, device_info in coordinator.data.items():
+        if device_id in ignored:
+            continue
         ir.async_create_issue(
             hass,
             DOMAIN,
