@@ -38,10 +38,14 @@
       },
       "discover": {
         "title": "Network discovery: {name}",
-        "description": "UDP scan: **{status}**\n\nEnter the device's local IP address.\n\nWhere to find IP: Tuya Smart app → device → pencil icon → Device Information → IP Address. Or check your router's DHCP table.",
+        "description": "UDP scan: **{status}**\n\nSelect an IP from the list or type it manually.\n\nWhere to find IP: Tuya Smart app → device → pencil icon → Device Information → IP Address. Or check your router's DHCP table.",
         "data": {
-          "host": "Device IP address"
+          "host": "Select IP or enter manually"
         }
+      },
+      "success": {
+        "title": "Device added: {name}",
+        "description": "**{name}** successfully added to Tuya Local at IP `{host}`.\n\nThe device is now controllable locally without internet."
       },
       "cloud_stub": {
         "title": "Cloud Entity: {name}",

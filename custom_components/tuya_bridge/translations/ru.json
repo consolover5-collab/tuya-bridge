@@ -38,10 +38,14 @@
       },
       "discover": {
         "title": "Поиск в сети: {name}",
-        "description": "UDP-сканирование: **{status}**\n\nВведите локальный IP-адрес устройства.\n\nГде найти IP: Tuya Smart → устройство → значок карандаша → Device Information → IP Address. Или в настройках роутера (DHCP).",
+        "description": "UDP-сканирование: **{status}**\n\nВыберите IP из списка или введите вручную.\n\nГде найти IP: Tuya Smart → устройство → значок карандаша → Device Information → IP Address. Или в настройках роутера (DHCP).",
         "data": {
-          "host": "IP-адрес устройства"
+          "host": "Выберите IP или введите вручную"
         }
+      },
+      "success": {
+        "title": "Устройство добавлено: {name}",
+        "description": "**{name}** успешно добавлено в Tuya Local по IP `{host}`.\n\nУстройство теперь управляется локально, без интернета."
       },
       "cloud_stub": {
         "title": "Cloud Entity: {name}",

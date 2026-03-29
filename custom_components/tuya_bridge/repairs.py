@@ -31,6 +31,7 @@ class TuyaBridgeRepairFlow(RepairsFlow):
         self._discovered_ip: str | None = None
         self._scan_results: dict[str, dict] | None = None
         self._auto_failed: bool = False
+        self._connected_host: str = ""
 
     def _load_device_info(self) -> None:
         """Load device info from coordinator."""
@@ -246,14 +247,14 @@ class TuyaBridgeRepairFlow(RepairsFlow):
             ip = f"{subnet_prefix}.{i}"
             try:
                 s = _socket.socket()
-                s.settimeout(0.3)
+                s.settimeout(0.6)
                 s.connect((ip, 6668))
                 s.close()
                 return ip
             except Exception:
                 return None
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=64) as ex:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=128) as ex:
             tcp_found = [ip for ip in ex.map(tcp_check, range(1, 255)) if ip]
 
         _LOGGER.info("TCP port 6668 scan found %d device(s): %s", len(tcp_found), tcp_found)
@@ -345,7 +346,8 @@ class TuyaBridgeRepairFlow(RepairsFlow):
                 ir.async_delete_issue(
                     self.hass, DOMAIN, f"new_device_{self._device_id}"
                 )
-                return self.async_create_entry(data={"result": "added_locally"})
+                self._connected_host = host
+                return await self.async_step_success()
 
             _LOGGER.warning(
                 "Unexpected tuya_local flow: type=%s step=%s", result_type, step_id,
@@ -355,6 +357,21 @@ class TuyaBridgeRepairFlow(RepairsFlow):
         except Exception:
             _LOGGER.exception("Failed to create tuya_local entry for %s", host)
             return self.async_abort(reason="creation_failed")
+
+    async def async_step_success(
+        self, user_input: dict[str, Any] | None = None
+    ) -> data_entry_flow.FlowResult:
+        """Show success confirmation after device was added to tuya_local."""
+        if user_input is not None:
+            return self.async_create_entry(data={"result": "added_locally"})
+        return self.async_show_form(
+            step_id="success",
+            data_schema=vol.Schema({}),
+            description_placeholders={
+                "name": self._device_name,
+                "host": self._connected_host,
+            },
+        )
 
     def _pick_device_type(self, flow_result: dict, category: str) -> str:
         """Pick the best device type from tuya_local's available options.
